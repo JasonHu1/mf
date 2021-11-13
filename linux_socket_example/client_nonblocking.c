@@ -1,4 +1,71 @@
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h> 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/signal.h>
+#include <sys/ioctl.h>
+#include <poll.h>
+#include <errno.h>
+
+int client_blocking_init(void*arg){
+
+    unsigned char rbuf[1024]={0};
+    int fd = 0;
+    struct sockaddr_in  addr;
+    fd_set fdr, fdw;
+    struct timeval timeout;
+    int err = 0;
+    int errlen = sizeof(err);
+    fd = socket(AF_INET,SOCK_STREAM,0);
+    if (fd < 0) {
+        fprintf(stderr, "create socket failed,error:%s.\n", strerror(errno));
+        return -1;
+    }
+
+    bzero(&addr, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(777);
+    inet_pton(AF_INET, "192.168.1.16", &addr.sin_addr);
+    
+
+    /*阻塞情况下linux系统默认超时时间为75s
+     connect返回值：0表示连接成功，-1表示连接失败
+    */
+    int rc = connect(fd, (struct sockaddr*)&addr, sizeof(addr));
+    if (rc != 0) {
+        fprintf(stderr, "connect failed, error:%s.\n", strerror(errno));
+        return -1;
+    }
+    printf("connect successfully\r\n");
+    for(;;){
+       memset(rbuff,0,1024);
+       /*
+        recv返回值<0 出错,     =0 对方调用了close API来关闭连接,       >0 接收到的数据大小
+        阻塞模式下recv会一直阻塞直到接收到数据，非阻塞模式下如果没有数据就会返回，不会阻塞着读，因此需要循环读取
+       */
+       int readSize = recv(fd,rbuff,1024,0);
+       printf("readSize=%d\r\n",readSize);
+       if(readSize == 0){
+           printf("peer close the socket\r\n");
+           close(fd);
+       }else if(readSize < 0){
+           perror("read data error,");
+       }else{
+           for(int i=0;i<readSize;i++){
+               printf("%02x ",rbuff[i]);
+           }
+           printf("\r\n");
+       }
+    }
+    return 0;
+}
+
 int client_nonblock_init(void*arg){
 
     unsigned char rbuf[1024]={0};
