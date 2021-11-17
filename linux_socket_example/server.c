@@ -13,7 +13,33 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <pthread.h>
+/*
 
+read与recv的返回值=0时含义是不一样的。
+
+recv返回值<0 出错,     =0 对方调用了close API来关闭连接,       >0 接收到的数据大小
+阻塞模式下recv会一直阻塞直到接收到数据，非阻塞模式下如果没有数据就会返回，不会阻塞着读，因此需要循环读取
+
+read函数是负责从fd中读取内容.
+ssize_t read(int fd,void *buf,size_t nbyte)
+当读成功 时,read返回实际所读的字节数,如果返回的值是0 表示已经读到文件的结束了,小于0表示出现了错误.
+
+
+ssize_t write(int fd, const void*buf,size_t nbytes);
+write函数将buf中的nbytes字节内容写入文件描述符fd.成功时返回写的字节数.失败时返回-1. 并设置errno变量. 在网络程序中,当我们向套接字文件描述符写时有两可能.
+1)write的返回值大于0,表示写了部分或者是全部的数据. 这样我们用一个while循环来不停的写入，但是循环过程中的buf参数和nbyte参数得由我们来更新。也就是说，网络写函数是不负责将全部数据写完之后在返回的。
+2)返回的值小于0,此时出现了错误.我们要根据错误类型来处理.
+如果错误为EINTR表示在写的时候出现了中断错误.
+如果为EPIPE表示网络连接出现了问题(对方已经关闭了连接).
+
+1）尽量使用recv(,,MSG_WAITALL),read必须配合while使用，否则数据量大(240*384)时数据读不完
+2）编程时写入的数据必须尽快读出，否则后面的数据将无法继续写入
+3）最佳搭配如下：
+        nbytes = recv(sockfd, buff, buff_size,MSG_WAITALL);
+        nbytes = send(scokfd, buff, buff_size,MSG_WAITALL);
+
+
+*/
 #define MAX_ACCEPT 5
 #define BUFFER_SIZE 1024
 int listen_socketFd,maxfd;
@@ -277,6 +303,7 @@ int socketSever_Init_poll(void)
 int socketSeverInit_epoll(void)
 {
     struct sockaddr_in serv_addr;
+
     int stat,tr=0;
 
     printf("socketSeverInit\n");
@@ -291,7 +318,10 @@ int socketSeverInit_epoll(void)
     bzero((char *) &serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons(778);
+    serv_addr.sin_port = htons(777);
+    // Set the socket option SO_REUSEADDR to reduce the chance of a 
+    // "Address Already in Use" error on the bind
+    setsockopt(listen_socketFd,SOL_SOCKET,SO_REUSEADDR,&tr,sizeof(int));
 
     stat = bind(listen_socketFd, (struct sockaddr *) &serv_addr,sizeof(serv_addr));
     if ( stat < 0) 
@@ -303,9 +333,6 @@ int socketSeverInit_epoll(void)
     listen(listen_socketFd,5); 
     // Set the fd to none blocking
     fcntl(listen_socketFd, F_SETFL, O_NONBLOCK);
-    // Set the socket option SO_REUSEADDR to reduce the chance of a 
-    // "Address Already in Use" error on the bind
-    setsockopt(listen_socketFd,SOL_SOCKET,SO_REUSEADDR,&tr,sizeof(int));
 
   	printf("init nonblock listen_socketFd=%d\n",listen_socketFd);
     for(int i = 0; i < MAX_ACCEPT; i ++){
@@ -360,10 +387,9 @@ int socketSeverInit_epoll(void)
                     // accept函数返回一个新的socket,这个socket(new_server_socket)用于同连接到的客户的通信
                     // new_server_socket代表了服务器和客户端之间的一个通信通道
                     // accept函数把连接到的客户端信息填写到客户端的socket地址结构client_addr中
-                    socklen_t length = sizeof (client_addr);
-
+                    socklen_t length =sizeof(socklen_t);
                     int new_server_socket = accept(listen_socketFd, (struct sockaddr *) &client_addr[Idx], &length);
-                    if (new_server_socket != 0){
+                    if (new_server_socket > 0){
                         printf("new_server_socket=%d\r\n",new_server_socket);
                         fcntl(new_server_socket, F_SETFL, O_NONBLOCK);
                         //epoll的监控列表不可以重复添加,来一个新的就添加一个，所以不可以放到for(;;)循环里面
@@ -380,15 +406,17 @@ int socketSeverInit_epoll(void)
                                 break;
                             }
                         }
+                    }else{
+                        perror("accept error");
+                        exit(1);
                     }
-                }else{
-                    printf("receive data\r\n");
+                }else if(events[Idx].events&EPOLLIN ){
                     //receive data
                     bzero(buffer, BUFFER_SIZE);
-                    int readlength = (int)read(events[Idx].data.fd, buffer,1024);
-                    if (readlength < 0)
+                    ssize_t readlength = recv(events[Idx].data.fd, buffer,1024,0);
+                    printf("receive data:%d\r\n",(int)readlength);
+                    if (readlength == 0)
                     {
-                        printf("Server Recieve Data Failed!\n");
                         //关闭listen socket
                         for(int n=0;n<MAX_ACCEPT+1;n++){
                             if(client_fd[n]== events[Idx].data.fd){
@@ -402,17 +430,23 @@ int socketSeverInit_epoll(void)
                         if(epoll_ctl(epollFd,EPOLL_CTL_DEL,events[Idx].data.fd,&ev)==-1)
                         {
                             perror("epoll_ctl:ServerFd");
-                            exit(1);
+                            exit(-1);
                         }
                         close(events[Idx].data.fd);
+                        printf("Server Recieve Data Failed!clsoe fd=%d\n",events[Idx].data.fd);
+                    }else if(readlength < 0){
+                        perror("non-blocking return \r\n");
                     }else{
-                        handleReceiveData((unsigned char*)buffer,readlength);
+                        handleReceiveData(events[Idx].data.fd,(unsigned char*)buffer,(int)readlength);
                     }
+                }else{
+                    printf("NOT Handler msg %d\r\n",events[Idx].events);
                 }
             }
         }
     }//for(;;)
     //关闭与客户端的连接
+    printf("can not run here\r\n");
     close(listen_socketFd);
     return 0;
 }
