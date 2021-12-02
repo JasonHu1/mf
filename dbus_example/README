@@ -1,0 +1,4 @@
+
+如下执行是可以获取thread网络channel
+sudo dbus-send --system --print-reply --type=method_call 
+--dest=io.openthread.BorderRouter.wpan0 /io/openthread/BorderRouter/wpan0 org.freedesktop.DBus.Properties.Get string:'io.openthread.BorderRouter' string:'Channel'
