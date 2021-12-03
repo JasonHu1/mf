@@ -63,7 +63,12 @@ class DbusInitiator{
         int init();
         DBusMessage *method_call(std::string Properity);
         DBusMessageIter* dbus_iter_enter_recurse(DBusMessageIter *iter,int *iterType);
+        bool dbus_dataType_parse(DBusMessageIter *iter,int iterType,void*pVal);
+        bool dbus_dataTye_array_parse(DBusMessageIter *iter,void*pVal);
         int query(std::string Properity,uint16_t*aValue);
+        int query(std::string Properity,uint8_t*aValue);
+        int query(std::string Properity,void*aValue);
+        bool dbus_dataType_parse1(DBusMessageIter *iter,int iterType,void*pVal);
     private:
         DBusConnection *mConnection;
         std::string const mServiceName ="io.openthread.BorderRouter.wpan0";
