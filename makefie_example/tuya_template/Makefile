@@ -1,4 +1,6 @@
 ROOT_DIR ?= $(abspath .)
+TUYA_LIB_ROOT_DIR ?=/mnt/hgfs/vm_share/ty_library
+SDK_NAME_VERSION ?=ty_integrated_sdk_gcc-arm-102-202011-x86_64-aarch64-none-linux-gnu_release-1.0.0-beta.4
 COMPILE_PREX ?=
 USER_LINK_FLAGS ?=
 APP_BIN_NAME ?= Z3GatewayHost
@@ -29,18 +31,18 @@ CPP = $(COMPILE_PREX)g++
 OBJCOPY = $(COMPILE_PREX)objcopy
 OBJDUMP = $(COMPILE_PREX)objdump
 APP_PACK = ./build/pack.sh
-
+#为了快捷更换sdk的版本，只在Makefile中指定sdk 库文件和头文件的路径，这样就不用把sdk下的库文件和头文件拷贝到源码目录下。
 LINKFLAGS = \
-		-L$(ROOT_DIR)/library -lty_iot_sdk -lty_module_gw_base -lpthread -lm 
-LINKFLAGS +=-lty_iot_sdk
+		-L$(ROOT_DIR)/library \
+		-L$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/lib
+		
+LINKFLAGS +=-lty_iot_sdk -lty_module_gw_base -lpthread -lm 
 LINKFLAGS +=-lty_module_center_ctrl
 LINKFLAGS +=-lty_module_router
-LINKFLAGS +=-lty_module_bluetooth
 LINKFLAGS +=-lty_module_center_ctrl
 LINKFLAGS +=-lty_module_gw_base
 LINKFLAGS +=-lty_module_pegasus
 LINKFLAGS +=-lty_module_router
-LINKFLAGS +=-lty_module_zigbee
 
 # LINKFLAGS += $(USER_LINK_FLAGS)
 LINKFLAGS := -Wl,--start-group $(LINKFLAGS) -Wl,--end-group
@@ -73,16 +75,27 @@ USER_SRCS += $(ZIGBEE_HOST_USER_SRC)
 #user头文件
 USER_INCS = $(addprefix -I ,  $(shell find $(USER_INC_BASE_DIR) -type d) )
 USER_INCS += -I$(ROOT_DIR)/library/inc 
-USER_INCS += -I$(ROOT_DIR)/library/inc/svc_devos/include/ 
-USER_INCS += -I$(ROOT_DIR)/library/inc/base_utilities/include/ 
-USER_INCS += -I$(ROOT_DIR)/library/inc/base_msgq/include/ 
-USER_INCS += -I$(ROOT_DIR)/library/inc/base_timeq/include/ 
-USER_INCS += -I$(ROOT_DIR)/library/inc/svc_api_iot/include/ 
-USER_INCS += -I$(ROOT_DIR)/library/inc/svc_wifi_netcfg/include/ 
-USER_INCS += -I$(ROOT_DIR)/library/inc/svc_lan/include/ 
-USER_INCS += -I$(ROOT_DIR)/library/inc/base_security/include/ 
-USER_INCS += -I$(ROOT_DIR)/library/inc/svc_gw_sdk_interface/include 
-USER_INCS += -I$(ROOT_DIR)/library/inc/base_iot_config/include/
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/svc_devos/include/ 
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_utilities/include/ 
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_msgq/include/ 
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_timeq/include/ 
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/svc_api_iot/include/ 
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/svc_wifi_netcfg/include/ 
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/svc_lan/include/ 
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_security/include/ 
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/svc_gw_sdk_interface/include 
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_iot_config/include/
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_os_adapter/
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_os_adapter/include
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_os_adapter/OS_adapter_linux
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_os_adapter/OS_adapter_linux/include
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_os_adapter/OS_adapter_linux/include/system/ 
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_log_mng/include
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_os_adapter_bt/include
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/base_uf/include
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/gw_base/comm/include
+USER_INCS += -I$(TUYA_LIB_ROOT_DIR)/$(SDK_NAME_VERSION)/sdk/gw_base/config/include/
 USER_INCS += $(ZIGBEE_HOST_USER_INCLUDES)
 
 #user的obj命令,使用wildcard函数过滤USER_SRCS列出但实际不存在的文件
