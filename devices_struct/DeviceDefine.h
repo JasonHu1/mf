@@ -22,26 +22,35 @@ extern "C"{
 #include "cluster-id.h"
 #include <lib/core/PeerId.h>
 /*
-step1、收到dnssd就创建class device节点条目，并添加devicemap列表中,此时class device节点只有nodeID一个信息
+typedef enum{
+    JOIN_STAGE_ANNOUNCE              = 0x0100,
+    JOIN_STAGE_BASIC_INFO_READ       = 0x0200,
+    JOIN_STAGE_BASIC_INFO_SUBCRIBE   = 0x0400,
+    JOIN_STAGE_UTILITY_READ          = 0x0800,
+    JOIN_STAGE_APP_SUBCRIBE          = 0x1000,
+    JOIN_STAGE_FINISH                = 0x2000,
+}JOINSTAGE_E;
 
-step2、读ep0 devicetype,写到class device结构中的mRootDevicetypes
 
-step3、读ep0 cluster返回的中列表list，ep0会有一些Utility cluster，就是之前zdo哪些cluster， 比如Access Control Cluster，估计后续得单独处理
+第一步，怕设备因故重启，收到dnssd首先就是一次性订阅ep0的basic info cluster中的StartUp/ShutDown/Leave/ReachableChanged 事件，并创建class device节点条目。
+此时class device节点只有nodeID一个信息，这个时候gw还没有子设备的权限，需要等到手机设置好gw的权限厚，网关才可以继续下面的读和订阅操作
 
-step4、读ep0 partlist返回设备的endpoint list，根据回复的partlist创建class EndpointType vector,并挂到class device的成员上
+第二步，一次性读取ep0中basic info的所有attribute属性，得到的内容写入mRootEndpoint.
 
-循环读ep0 partlist中的endpoint
+第三步，一次性读ep0的 descriptor partlist/devicetypeList/server clusterList/client clusterList，得到的内容写入mRootEndpoint.
+	ep0会有一些Utility cluster，就是之前zdo哪些cluster， 比如Access Control Cluster，先读到，后面怎么用再说
 
-step5、读epx devicetype,找到对应的endpointtype元素，写到元素中的成员devicetype
+第四步，根据ep0的partlist个数和内容，循环读取epx的 descriptor partlist/devicetypeList/server clusterList/client clusterList
 
-step6、读epx cluster返回，找到对应的endpointtype元素，根据返回的cluster列表来在eptype节点结构中的创建mcluster
+上面四个步骤是基本操作，下面要根据每个ep的devicetype 来决定订阅哪些属性
 
-step7、读epx partlist返回了，根据回复的partlist创建eptype节点,eptype中还没有普通cluster
+第五步，根据devicetype去分别订阅应用epx上的属性上报，只订阅不读每个ep的attribute
 
-step8、读ep的普通attibute就是update,attribute没有一个汇总的列表，只能是按照spec逐个的去读。
-
+第六步，持久化存储，并上报给tuya cloud
 
 每次来信息都需要遍历，不太好，加网的状态机过程，要endpointtype元素作为上下文context传递，这样就不用每次遍历了。
+
+需要一个分发器来swtich-case处理设备处在每个状态要执行的动作。
 */
 namespace tuya {
     namespace app{
