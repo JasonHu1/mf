@@ -21,15 +21,6 @@ extern "C"{
 #include "attribute-type.h"
 #include "cluster-id.h"
 #include <lib/core/PeerId.h>
-/*
-typedef enum{
-    JOIN_STAGE_ANNOUNCE              = 0x0100,
-    JOIN_STAGE_BASIC_INFO_READ       = 0x0200,
-    JOIN_STAGE_BASIC_INFO_SUBCRIBE   = 0x0400,
-    JOIN_STAGE_UTILITY_READ          = 0x0800,
-    JOIN_STAGE_APP_SUBCRIBE          = 0x1000,
-    JOIN_STAGE_FINISH                = 0x2000,
-}JOINSTAGE_E;
 
 
 第一步，怕设备因故重启，收到dnssd首先就是一次性订阅ep0的basic info cluster中的StartUp/ShutDown/Leave/ReachableChanged 事件，并创建class device节点条目。
@@ -58,25 +49,43 @@ namespace tuya {
         #define JOIN_STAGE_ANNOUNCE_STATUS_SHUTDOWN     0x02
         #define JOIN_STAGE_ANNOUNCE_STATUS_LEAVE        0x04
         #define JOIN_STAGE_ANNOUNCE_STATUS_REACHABLE    0x08
+        #define JOIN_STAGE_ANNOUNCE_STATUS_FULL         0x0F
+
+        #define JOIN_STAGE_BASIC_INFO_SUBCRIBE_STATUS_DEVICETYPE       0x01
+        #define JOIN_STAGE_BASIC_INFO_SUBCRIBE_STATUS_PARTLIST         0x02
+        #define JOIN_STAGE_BASIC_INFO_SUBCRIBE_STATUS_CLIENTCLUSETR    0x04
+        #define JOIN_STAGE_BASIC_INFO_SUBCRIBE_STATUS_SERVERCLUSTER    0x08
+        #define JOIN_STAGE_BASIC_INFO_SUBCRIBE_STATUS_FULL             0xFF
+
+        #define JOIN_STAGE_UTILITY_READ_STATUS_Location                    0x01
+        #define JOIN_STAGE_UTILITY_READ_STATUS_InteractionModelVersion     0x02
+        #define JOIN_STAGE_UTILITY_READ_STATUS_VendorName                  0x04
+        #define JOIN_STAGE_UTILITY_READ_STATUS_VendorID                    0x08
+        #define JOIN_STAGE_UTILITY_READ_STATUS_ProductName                 0x10
+        #define JOIN_STAGE_UTILITY_READ_STATUS_ProductID                   0x20
+        #define JOIN_STAGE_UTILITY_READ_STATUS_NodeLabel                   0x40
+        #define JOIN_STAGE_UTILITY_READ_STATUS_FULL                        0x7F
         /*
         状态迁移顺序：
         1.怕设备因故重启，收到底层dnssd发现的服务提供节点置 JOIN_STAGE_ANNOUNCE ，首先订阅基本四个基本事件，开启配网状态迁移
         2.四个基本事件订阅成功置 JOIN_STAGE_BASIC_INFO_SUBCRIBE ，然后从ep0开始，先读工具性的类似zdo的clustef信息，比如读ep0 descriptor的四个属性来创建cluster条目表
         3.ep0 descriptor读取成功置 JOIN_STAGE_UTILITY_READ ，根据此读取ep0的其他工具管理性的属性来进一步了解和标识节点，比如basic information
         4.读到ep0 basic information成功置 JOIN_STAGE_BASIC_INFO_READ ， 开始根据产品功能特性去订阅需要接收的周期上报
-        5.epx的功能属性订阅成功了置 JOIN_STAGE_APP_SUBCRIBE ，进行云端注册和持久化存储
-        6.云端注册成功，完成后置 JOIN_STAGE_SUCCESS 。
-        7.本地持久化存储，完成置 JOIN_STAGE_FINISH 。
+        5.读epx的四大
+        6.epx的功能属性订阅成功了置 JOIN_STAGE_APP_SUBCRIBE ，进行云端注册和持久化存储
+        7.云端注册成功，完成后置 JOIN_STAGE_SUCCESS 。
+        8.本地持久化存储，完成置 JOIN_STAGE_FINISH 。
 
         */
         typedef enum{
             JOIN_STAGE_ANNOUNCE              = 0x00,
-            JOIN_STAGE_BASIC_INFO_SUBCRIBE   = 0x02,
-            JOIN_STAGE_UTILITY_READ          = 0x03,
-            JOIN_STAGE_BASIC_INFO_READ       = 0x01,
-            JOIN_STAGE_APP_SUBCRIBE          = 0x04,
-            JOIN_STAGE_SUCCESS               = 0x05,
-            JOIN_STAGE_FINISH                = 0x06,
+            JOIN_STAGE_BASIC_INFO_SUBCRIBE   = 0x01,
+            JOIN_STAGE_UTILITY_READ          = 0x02,
+            JOIN_STAGE_BASIC_INFO_READ       = 0x03,
+            JOIN_STAGE_APP_INFO_READ         = 0x04,
+            JOIN_STAGE_APP_SUBCRIBE          = 0x05,
+            JOIN_STAGE_SUCCESS               = 0x06,
+            JOIN_STAGE_FINISH                = 0x07,
         }JOINSTAGE_E;
         class Attribute{
             public:
@@ -95,7 +104,6 @@ namespace tuya {
                 }
                 ~Cluster(){}
                 chip::ClusterId mClusterId;
-                std::vector<Attribute>mAttributes;//vector效率好,线程安全
                 EmberAfClusterMask mMask;//client or server
                 int AddOrUpdateAttributeData(chip::AttributeId inAttrId,EmberAfAttributeType datatype,std::string val){
                     int ret=0;
@@ -118,13 +126,14 @@ namespace tuya {
                     }
                     return nullptr;
                 }
+            private:
+                std::vector<Attribute>mAttributes;//vector效率好,线程安全
         };//class Cluster
         class EndpointType{
             public:
                 EndpointType(chip::EventNumber ep):mEndpointNumber(ep){}
                 ~EndpointType(){}
                 chip::EventNumber mEndpointNumber;
-                std::vector<Cluster> mClusters;
                 std::vector<chip::DeviceTypeId> mDevicetypes;
                 /*
                 *保存descriptor client/server cluster 返回的列表
@@ -155,6 +164,9 @@ namespace tuya {
                     }
                     return nullptr;
                 }
+            private:
+                std::vector<Cluster> mClusters;
+
         };//class EndpointType
         class Node{
             public:
@@ -194,6 +206,8 @@ namespace tuya {
                 void SetJoinStage(uint8_t stage)
                 {
                     mJoinStage = ((uint32_t)stage)<<24;
+                    //状态迁移时，清重发定时计数时间戳可以立即迁移到下个状态
+                    mTimeStamp=0;
                 }
                 uint8_t GetJoinStatus(void) const 
                 {
@@ -217,8 +231,8 @@ namespace tuya {
             public:
                 std::vector<EndpointType> mEndpointTypes;
                 EndpointType mRootEndpoint= EndpointType(0);// 这是ep0上的Utility cluster，要经常用要单独列出来，就是代替之前zdo那些cluster的， 比如Access Control Cluster
-                std::vector<uint64_t> mEndpointNumber;
-                uint64_t mTimeStamp;//节点最新的上报时间戳
+                std::vector<chip::EndpointId> mEndpointNumber;
+                time_t mTimeStamp;//节点最新的上报时间戳
                 chip::NodeId mNodeId;
                 chip::FabricId mFabricId;
                 std::string mEui64;
@@ -264,9 +278,8 @@ namespace tuya {
                         if(node->mNodeId==nodeid){
                             return  node.get();
                         }
-                        return nullptr;
                     }
-                   
+                    return nullptr;
                 }
                 std::map<std::string,std::shared_ptr<Node>> getDeviceMap() {
                     return mDeviceMap;
@@ -276,6 +289,133 @@ namespace tuya {
                 std::map<std::string,std::shared_ptr<Node>> mDeviceMap;
                 std::mutex mDevMapMutex;//std::lock_guard<std::mutex> lock(mMutex);
         };//class Devices
+        typedef struct _EmberAfPluginLinkedListElement {
+        struct _EmberAfPluginLinkedListElement* next;
+        struct _EmberAfPluginLinkedListElement* previous;
+        void* content;
+        } EmberAfPluginLinkedListElement;
+        /*
+        正在配网的节点队列，只在完成全部配网步骤后才从配网队列中删除，否则只有在成功和超时失败时删除，过程中不删除。
+        并且是依次顺序的不停的遍历节点的配网状态来做重发的，而不是每次都取第一个节点。
+        */
+        class JoinRingQueue
+        {
+            public:
+                JoinRingQueue(){
+                    mhead=nullptr;
+                    mtail=nullptr;
+                    mcurr=nullptr;
+                    mcount=0;
+                }
+                ~JoinRingQueue(){}
+                
+                void emberAfPluginLinkedListPushBack(void* content)
+                {
+                    EmberAfPluginLinkedListElement* element =
+                        (EmberAfPluginLinkedListElement*)malloc(sizeof(EmberAfPluginLinkedListElement));
+
+                    if (element != nullptr) {
+                        element->content = content;
+                        element->next = nullptr;
+                        element->previous = mtail;
+                        if (mhead == nullptr) {
+                            mhead = element;
+                        } else {
+                            mtail->next = element;
+                        }
+                        mtail = element;
+                        ++(mcount);
+                    }
+                    else
+                    {
+                        PR_ERR("memery malloc failed");
+                    }
+                }
+
+                void emberAfPluginLinkedListPopFront(void)
+                {
+                    if (mcount > 0) {
+                        EmberAfPluginLinkedListElement* head = mhead;
+                        if (mtail == head) {
+                            mtail = nullptr;
+                        }
+                        if(mcurr == head){
+                            mcurr = mhead->next;
+                        }
+                        mhead = mhead->next;
+                        free(head);
+                        --(mcount);
+                    }
+                }
+
+                bool emberAfPluginLinkedListRemoveElement(EmberAfPluginLinkedListElement* element)
+                {
+                    if ((element != nullptr) && (mhead != nullptr)) {
+                        if(element == mcurr){
+                            mcurr = element->next;
+                            mcurr->previous = element->previous;
+                        }
+                        if (element == mhead) {
+                            if (mhead == mtail) {
+                                mhead = nullptr;
+                                mtail = nullptr;
+                            } else {
+                                mhead = element->next;
+                                element->next->previous = nullptr;
+                            }
+                        } else if (element == mtail) {
+                            mtail = element->previous;
+                            element->previous->next = nullptr;
+                        } else {
+                            element->previous->next = element->next;
+                            element->next->previous = element->previous;
+                        }
+                        --(mcount);
+                        free(element);
+                        return true;
+                    }
+                    return false;
+                }
+
+                bool emberAfPluginLinkedListClearAllElements(void)
+                {
+                    while (mhead != nullptr) {
+                        emberAfPluginLinkedListPopFront();
+                    }
+                    return true;
+                }
+
+                EmberAfPluginLinkedListElement* emberAfPluginLinkedListSpecialElement(EmberAfPluginLinkedListElement* elementPosition)
+                {
+                    if (elementPosition == nullptr) {
+                        mcurr = mhead->next;
+                        return mhead;
+                    } else {
+                        mcurr = elementPosition->next->next;
+                        return elementPosition->next;
+                    }
+                }
+                EmberAfPluginLinkedListElement* emberAfPluginLinkedListNextElement(void)
+                {
+                    EmberAfPluginLinkedListElement* temp=mcurr;
+                    if ((mcurr != mtail) && (mcurr!=nullptr)) {
+                        mcurr = mcurr->next;
+                    } else {
+                        temp = mhead;
+                        if(mhead!=nullptr){
+                            mcurr = mhead->next;
+                        }
+                    }
+                    return temp;
+                }
+
+            private:
+                EmberAfPluginLinkedListElement* mhead;
+                EmberAfPluginLinkedListElement* mtail;
+                EmberAfPluginLinkedListElement* mcurr;//not use
+                uint32_t mcount;
+                uint32_t muxItemSize;
+        };
     }//namespace app
 }//namespace tuya
 #endif//__DEVICE_DEFINE_H__
